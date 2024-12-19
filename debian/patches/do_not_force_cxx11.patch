@@ -9,7 +9,7 @@ Index: libjxl/CMakeLists.txt
 ===================================================================
 --- libjxl.orig/CMakeLists.txt
 +++ libjxl/CMakeLists.txt
-@@ -202,9 +202,9 @@ find_package(Threads REQUIRED)
+@@ -224,9 +224,9 @@ find_package(Threads REQUIRED)
  
  # These settings are important to drive check_cxx_source_compiles
  # See CMP0067 (min cmake version is 3.10 anyway)
@@ -21,16 +21,3 @@ Index: libjxl/CMakeLists.txt
  
  # Atomics
  find_package(Atomics REQUIRED)
-Index: libjxl/lib/CMakeLists.txt
-===================================================================
---- libjxl.orig/lib/CMakeLists.txt
-+++ libjxl/lib/CMakeLists.txt
-@@ -39,7 +39,7 @@ set(JPEGXL_INTERNAL_FLAGS
-   # WARN_FLAGS
-   -Wall
-   -Wextra
--  -Wc++11-compat
-+  -Wc++17-compat
-   -Warray-bounds
-   -Wformat-security
-   -Wimplicit-fallthrough

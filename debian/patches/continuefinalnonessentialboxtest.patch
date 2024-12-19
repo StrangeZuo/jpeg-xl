@@ -7,8 +7,8 @@ Index: libjxl/lib/jxl/decode_test.cc
 ===================================================================
 --- libjxl.orig/lib/jxl/decode_test.cc
 +++ libjxl/lib/jxl/decode_test.cc
-@@ -4851,7 +4851,7 @@ TEST(DecodeTest, JXL_TRANSCODE_JPEG_TEST
-   VerifyJPEGReconstruction(jxl, jpeg);
+@@ -4966,7 +4966,7 @@ TEST(DecodeTest, JXL_TRANSCODE_JPEG_TEST
+   VerifyJPEGReconstruction(jxl::Bytes(jxl), jxl::Bytes(jpeg));
  }
  
 -TEST(DecodeTest, ContinueFinalNonEssentialBoxTest) {

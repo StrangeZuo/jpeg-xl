@@ -6,12 +6,11 @@
 // This example prints information from the main codestream header.
 
 #include <inttypes.h>
+#include <jxl/decode.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-#include "jxl/decode.h"
 
 int PrintBasicInfo(FILE* file, int verbose) {
   uint8_t* data = NULL;
@@ -90,7 +89,7 @@ int PrintBasicInfo(FILE* file, int verbose) {
       if (info.exponent_bits_per_sample) {
         printf("float (%d exponent bits) ", info.exponent_bits_per_sample);
       }
-      int cmyk = 0, alpha = 0;
+      int cmyk = 0;
       const char* const ec_type_names[] = {
           "Alpha",     "Depth",     "Spotcolor", "Selection", "Black",
           "CFA",       "Thermal",   "Reserved0", "Reserved1", "Reserved2",
@@ -105,17 +104,12 @@ int PrintBasicInfo(FILE* file, int verbose) {
           break;
         }
         if (extra.type == JXL_CHANNEL_BLACK) cmyk = 1;
-        if (extra.type == JXL_CHANNEL_ALPHA) alpha = 1;
       }
       if (info.num_color_channels == 1)
         printf("Grayscale");
       else {
         if (cmyk) {
-          printf("CMYK");
-          cmyk = 0;
-        } else if (alpha) {
-          printf("RGBA");
-          alpha = 0;
+          printf("CMY");
         } else {
           printf("RGB");
         }
@@ -126,15 +120,6 @@ int PrintBasicInfo(FILE* file, int verbose) {
           fprintf(stderr, "JxlDecoderGetExtraChannelInfo failed\n");
           break;
         }
-        if (extra.type == JXL_CHANNEL_BLACK && cmyk == 0) {
-          cmyk = 1;
-          continue;
-        }
-        if (extra.type == JXL_CHANNEL_ALPHA && alpha == 0) {
-          alpha = 1;
-          continue;
-        }
-
         printf("+%s", (extra.type < ec_type_names_size
                            ? ec_type_names[extra.type]
                            : "Unknown, please update your libjxl"));
@@ -229,14 +214,12 @@ int PrintBasicInfo(FILE* file, int verbose) {
         fprintf(stderr, "Invalid orientation\n");
       }
     } else if (status == JXL_DEC_COLOR_ENCODING) {
-      JxlPixelFormat format = {4, JXL_TYPE_FLOAT, JXL_LITTLE_ENDIAN, 0};
       printf("Color space: ");
 
       JxlColorEncoding color_encoding;
       if (JXL_DEC_SUCCESS ==
-          JxlDecoderGetColorAsEncodedProfile(dec, &format,
-                                             JXL_COLOR_PROFILE_TARGET_ORIGINAL,
-                                             &color_encoding)) {
+          JxlDecoderGetColorAsEncodedProfile(
+              dec, JXL_COLOR_PROFILE_TARGET_ORIGINAL, &color_encoding)) {
         const char* const cs_string[4] = {"RGB", "Grayscale", "XYB", "Unknown"};
         const char* const wp_string[12] = {"", "D65", "Custom", "", "",  "",
                                            "", "",    "",       "", "E", "P3"};
@@ -280,8 +263,7 @@ int PrintBasicInfo(FILE* file, int verbose) {
         // instead.
         size_t profile_size;
         if (JXL_DEC_SUCCESS !=
-            JxlDecoderGetICCProfileSize(dec, &format,
-                                        JXL_COLOR_PROFILE_TARGET_ORIGINAL,
+            JxlDecoderGetICCProfileSize(dec, JXL_COLOR_PROFILE_TARGET_ORIGINAL,
                                         &profile_size)) {
           fprintf(stderr, "JxlDecoderGetICCProfileSize failed\n");
           continue;
@@ -292,10 +274,9 @@ int PrintBasicInfo(FILE* file, int verbose) {
           continue;
         }
         uint8_t* profile = (uint8_t*)malloc(profile_size);
-        if (JXL_DEC_SUCCESS !=
-            JxlDecoderGetColorAsICCProfile(dec, &format,
-                                           JXL_COLOR_PROFILE_TARGET_ORIGINAL,
-                                           profile, profile_size)) {
+        if (JXL_DEC_SUCCESS != JxlDecoderGetColorAsICCProfile(
+                                   dec, JXL_COLOR_PROFILE_TARGET_ORIGINAL,
+                                   profile, profile_size)) {
           fprintf(stderr, "JxlDecoderGetColorAsICCProfile failed\n");
           free(profile);
           continue;
@@ -326,11 +307,11 @@ int PrintBasicInfo(FILE* file, int verbose) {
       } else {
         printf("full image size");
       }
-
-      float ms = frame_header.duration * 1000.f *
-                 info.animation.tps_denominator / info.animation.tps_numerator;
-      total_duration += ms;
       if (info.have_animation) {
+        float ms = frame_header.duration * 1000.f *
+                   info.animation.tps_denominator /
+                   info.animation.tps_numerator;
+        total_duration += ms;
         printf(", duration: %.1f ms", ms);
         if (info.animation.have_timecodes) {
           printf(", time code: %X", frame_header.timecode);

@@ -6,7 +6,6 @@
 #include "lib/jxl/dec_noise.h"
 
 #include <stdint.h>
-#include <stdio.h>
 #include <stdlib.h>
 
 #include <algorithm>
@@ -21,7 +20,6 @@
 #include "lib/jxl/base/compiler_specific.h"
 #include "lib/jxl/chroma_from_luma.h"
 #include "lib/jxl/image_ops.h"
-#include "lib/jxl/opsin_params.h"
 #include "lib/jxl/sanitizers.h"
 #include "lib/jxl/xorshift128plus-inl.h"
 HWY_BEFORE_NAMESPACE();
@@ -69,7 +67,7 @@ void RandomImage(Xorshift128Plus* rng, const Rect& rect,
 
     size_t x = 0;
     // Only entire batches (avoids exceeding the image padding).
-    for (; x + kFloatsPerBatch <= xsize; x += kFloatsPerBatch) {
+    for (; x + kFloatsPerBatch < xsize; x += kFloatsPerBatch) {
       rng->Fill(batch);
       for (size_t i = 0; i < kFloatsPerBatch; i += Lanes(df)) {
         BitsToFloat(reinterpret_cast<const uint32_t*>(batch) + i, row + x + i);

@@ -12,11 +12,11 @@ Ref: https://buildd.debian.org/status/fetch.php?pkg=jpeg-xl&arch=arm64&ver=0.7.0
  lib/jxl/fast_dct-inl.h | 3 +++
  1 file changed, 3 insertions(+)
 
-diff --git a/lib/jxl/fast_dct-inl.h b/lib/jxl/fast_dct-inl.h
-index defdfcd..0999095 100644
---- a/lib/jxl/fast_dct-inl.h
-+++ b/lib/jxl/fast_dct-inl.h
-@@ -15,6 +15,9 @@
+Index: libjxl/lib/jxl/fast_dct-inl.h
+===================================================================
+--- libjxl.orig/lib/jxl/fast_dct-inl.h
++++ libjxl/lib/jxl/fast_dct-inl.h
+@@ -16,6 +16,9 @@
  
  #include "lib/jxl/base/status.h"
  

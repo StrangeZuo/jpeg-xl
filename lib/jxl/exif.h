@@ -9,8 +9,8 @@
 // Basic parsing of Exif (just enough for the render-impacting things
 // like orientation)
 
-#include "jxl/codestream_header.h"
-#include "lib/jxl/base/padded_bytes.h"
+#include <jxl/codestream_header.h>
+
 #include "lib/jxl/image_metadata.h"
 
 namespace jxl {
@@ -38,9 +38,10 @@ inline size_t FindExifTagPosition(const std::vector<uint8_t>& exif,
   bool bigendian;
   if (!IsExif(exif, &bigendian)) return 0;
   const uint8_t* t = exif.data() + 4;
-  uint32_t offset = (bigendian ? LoadBE32(t) : LoadLE32(t));
+  uint64_t offset = (bigendian ? LoadBE32(t) : LoadLE32(t));
   if (exif.size() < 12 + offset + 2 || offset < 8) return 0;
   t += offset - 4;
+  if (offset + 2 >= exif.size()) return 0;
   uint16_t nb_tags = (bigendian ? LoadBE16(t) : LoadLE16(t));
   t += 2;
   while (nb_tags > 0) {
@@ -54,9 +55,9 @@ inline size_t FindExifTagPosition(const std::vector<uint8_t>& exif,
   return 0;
 }
 
-// TODO (jon): tag 1 can be used to represent Adobe RGB 1998 if it has value
+// TODO(jon): tag 1 can be used to represent Adobe RGB 1998 if it has value
 // "R03"
-// TODO (jon): set intrinsic dimensions according to
+// TODO(jon): set intrinsic dimensions according to
 // https://discourse.wicg.io/t/proposal-exif-image-resolution-auto-and-from-image/4326/24
 // Parses the Exif data just enough to extract any render-impacting info.
 // If the Exif data is invalid or could not be parsed, then it is treated

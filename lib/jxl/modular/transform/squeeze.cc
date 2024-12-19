@@ -7,9 +7,9 @@
 
 #include <stdlib.h>
 
+#include "lib/jxl/base/common.h"
 #include "lib/jxl/base/data_parallel.h"
 #include "lib/jxl/base/printf_macros.h"
-#include "lib/jxl/common.h"
 #include "lib/jxl/modular/modular_image.h"
 #include "lib/jxl/modular/transform/transform.h"
 #undef HWY_TARGET_INCLUDE
@@ -449,22 +449,23 @@ Status MetaSqueeze(Image &image, std::vector<SqueezeParams> *parameters) {
       }
       size_t w = image.channel[c].w;
       size_t h = image.channel[c].h;
+      if (w == 0 || h == 0) return JXL_FAILURE("Squeezing empty channel");
       if (horizontal) {
         image.channel[c].w = (w + 1) / 2;
-        image.channel[c].hshift++;
+        if (image.channel[c].hshift >= 0) image.channel[c].hshift++;
         w = w - (w + 1) / 2;
       } else {
         image.channel[c].h = (h + 1) / 2;
-        image.channel[c].vshift++;
+        if (image.channel[c].vshift >= 0) image.channel[c].vshift++;
         h = h - (h + 1) / 2;
       }
       image.channel[c].shrink();
-      Channel dummy(w, h);
-      dummy.hshift = image.channel[c].hshift;
-      dummy.vshift = image.channel[c].vshift;
+      Channel placeholder(w, h);
+      placeholder.hshift = image.channel[c].hshift;
+      placeholder.vshift = image.channel[c].vshift;
 
       image.channel.insert(image.channel.begin() + offset + (c - beginc),
-                           std::move(dummy));
+                           std::move(placeholder));
       JXL_DEBUG_V(8, "MetaSqueeze applied, current image: %s",
                   image.DebugString().c_str());
     }

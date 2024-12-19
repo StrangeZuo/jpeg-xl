@@ -36,7 +36,6 @@
  *
  */
 
-#include <stdio.h>
 #include <string.h>
 
 #include <string>
@@ -45,12 +44,18 @@
 #include "lib/extras/exif.h"
 #include "lib/jxl/base/byte_order.h"
 #include "lib/jxl/base/printf_macros.h"
+#if JPEGXL_ENABLE_APNG
 #include "png.h" /* original (unpatched) libpng is ok */
+#endif
 
 namespace jxl {
 namespace extras {
 
+#if JPEGXL_ENABLE_APNG
 namespace {
+
+constexpr unsigned char kExifSignature[6] = {0x45, 0x78, 0x69,
+                                             0x66, 0x00, 0x00};
 
 class APNGEncoder : public Encoder {
  public:
@@ -58,8 +63,10 @@ class APNGEncoder : public Encoder {
     std::vector<JxlPixelFormat> formats;
     for (const uint32_t num_channels : {1, 2, 3, 4}) {
       for (const JxlDataType data_type : {JXL_TYPE_UINT8, JXL_TYPE_UINT16}) {
-        formats.push_back(JxlPixelFormat{num_channels, data_type,
-                                         JXL_BIG_ENDIAN, /*align=*/0});
+        for (JxlEndianness endianness : {JXL_BIG_ENDIAN, JXL_LITTLE_ENDIAN}) {
+          formats.push_back(
+              JxlPixelFormat{num_channels, data_type, endianness, /*align=*/0});
+        }
       }
     }
     return formats;
@@ -96,12 +103,24 @@ class BlobsWriterPNG {
       // identity to avoid repeated orientation.
       std::vector<uint8_t> exif = blobs.exif;
       ResetExifOrientation(exif);
+      // By convention, the data is prefixed with "Exif\0\0" when stored in
+      // the legacy (and non-standard) "Raw profile type exif" text chunk
+      // currently used here.
+      // TODO(user): Store Exif data in an eXIf chunk instead, which always
+      //             begins with the TIFF header.
+      if (exif.size() >= sizeof kExifSignature &&
+          memcmp(exif.data(), kExifSignature, sizeof kExifSignature) != 0) {
+        exif.insert(exif.begin(), kExifSignature,
+                    kExifSignature + sizeof kExifSignature);
+      }
       JXL_RETURN_IF_ERROR(EncodeBase16("exif", exif, strings));
     }
     if (!blobs.iptc.empty()) {
       JXL_RETURN_IF_ERROR(EncodeBase16("iptc", blobs.iptc, strings));
     }
     if (!blobs.xmp.empty()) {
+      // TODO(user): Store XMP data in an "XML:com.adobe.xmp" text chunk
+      //             instead.
       JXL_RETURN_IF_ERROR(EncodeBase16("xmp", blobs.xmp, strings));
     }
     return true;
@@ -142,7 +161,7 @@ class BlobsWriterPNG {
   }
 };
 
-void MaybeAddCICP(JxlColorEncoding c_enc, png_structp png_ptr,
+void MaybeAddCICP(const JxlColorEncoding& c_enc, png_structp png_ptr,
                   png_infop info_ptr) {
   png_byte cicp_data[4] = {};
   png_unknown_chunk cicp_chunk;
@@ -172,11 +191,78 @@ void MaybeAddCICP(JxlColorEncoding c_enc, png_structp png_ptr,
   cicp_data[3] = 1;
   cicp_chunk.data = cicp_data;
   cicp_chunk.size = sizeof(cicp_data);
-  cicp_chunk.location = PNG_HAVE_PLTE;
+  cicp_chunk.location = PNG_HAVE_IHDR;
   memcpy(cicp_chunk.name, "cICP", 5);
-  png_set_keep_unknown_chunks(png_ptr, 3,
+  png_set_keep_unknown_chunks(png_ptr, PNG_HANDLE_CHUNK_ALWAYS,
                               reinterpret_cast<const png_byte*>("cICP"), 1);
   png_set_unknown_chunks(png_ptr, info_ptr, &cicp_chunk, 1);
+}
+
+bool MaybeAddSRGB(const JxlColorEncoding& c_enc, png_structp png_ptr,
+                  png_infop info_ptr) {
+  if (c_enc.transfer_function == JXL_TRANSFER_FUNCTION_SRGB &&
+      (c_enc.color_space == JXL_COLOR_SPACE_GRAY ||
+       (c_enc.color_space == JXL_COLOR_SPACE_RGB &&
+        c_enc.primaries == JXL_PRIMARIES_SRGB &&
+        c_enc.white_point == JXL_WHITE_POINT_D65))) {
+    png_set_sRGB(png_ptr, info_ptr, c_enc.rendering_intent);
+    png_set_cHRM_fixed(png_ptr, info_ptr, 31270, 32900, 64000, 33000, 30000,
+                       60000, 15000, 6000);
+    png_set_gAMA_fixed(png_ptr, info_ptr, 45455);
+    return true;
+  }
+  return false;
+}
+
+void MaybeAddCHRM(const JxlColorEncoding& c_enc, png_structp png_ptr,
+                  png_infop info_ptr) {
+  if (c_enc.color_space != JXL_COLOR_SPACE_RGB) return;
+  if (c_enc.primaries == 0) return;
+  png_set_cHRM(png_ptr, info_ptr, c_enc.white_point_xy[0],
+               c_enc.white_point_xy[1], c_enc.primaries_red_xy[0],
+               c_enc.primaries_red_xy[1], c_enc.primaries_green_xy[0],
+               c_enc.primaries_green_xy[1], c_enc.primaries_blue_xy[0],
+               c_enc.primaries_blue_xy[1]);
+}
+
+void MaybeAddGAMA(const JxlColorEncoding& c_enc, png_structp png_ptr,
+                  png_infop info_ptr) {
+  switch (c_enc.transfer_function) {
+    case JXL_TRANSFER_FUNCTION_LINEAR:
+      png_set_gAMA_fixed(png_ptr, info_ptr, PNG_FP_1);
+      break;
+    case JXL_TRANSFER_FUNCTION_SRGB:
+      png_set_gAMA_fixed(png_ptr, info_ptr, 45455);
+      break;
+    case JXL_TRANSFER_FUNCTION_GAMMA:
+      png_set_gAMA(png_ptr, info_ptr, c_enc.gamma);
+      break;
+
+    default:;
+      // No gAMA chunk.
+  }
+}
+
+void MaybeAddCLLi(const JxlColorEncoding& c_enc, const float intensity_target,
+                  png_structp png_ptr, png_infop info_ptr) {
+  if (c_enc.transfer_function != JXL_TRANSFER_FUNCTION_PQ) return;
+
+  const uint32_t max_cll =
+      static_cast<uint32_t>(10000.f * Clamp1(intensity_target, 0.f, 10000.f));
+  png_byte chunk_data[8] = {};
+  chunk_data[0] = (max_cll >> 24) & 0xFF;
+  chunk_data[1] = (max_cll >> 16) & 0xFF;
+  chunk_data[2] = (max_cll >> 8) & 0xFF;
+  chunk_data[3] = max_cll & 0xFF;
+  // Leave MaxFALL set to 0.
+  png_unknown_chunk chunk;
+  memcpy(chunk.name, "cLLi", 5);
+  chunk.data = chunk_data;
+  chunk.size = sizeof chunk_data;
+  chunk.location = PNG_HAVE_IHDR;
+  png_set_keep_unknown_chunks(png_ptr, PNG_HANDLE_CHUNK_ALWAYS,
+                              reinterpret_cast<const png_byte*>("cLLi"), 1);
+  png_set_unknown_chunks(png_ptr, info_ptr, &chunk, 1);
 }
 
 Status APNGEncoder::EncodePackedPixelFileToAPNG(
@@ -233,21 +319,7 @@ Status APNGEncoder::EncodePackedPixelFileToAPNG(
       } else {
         memcpy(&out[0], in, out_size);
       }
-    } else if (format.data_type == JXL_TYPE_FLOAT) {
-      float mul = 65535.0;
-      const uint8_t* p_in = in;
-      uint8_t* p_out = out.data();
-      for (size_t i = 0; i < num_samples; ++i, p_in += 4, p_out += 2) {
-        uint32_t val = (format.endianness == JXL_BIG_ENDIAN ? LoadBE32(p_in)
-                                                            : LoadLE32(p_in));
-        float fval;
-        memcpy(&fval, &val, 4);
-        StoreBE16(static_cast<uint32_t>(fval * mul + 0.5), p_out);
-      }
-    } else {
-      return JXL_FAILURE("Unsupported pixel data type");
     }
-
     png_structp png_ptr;
     png_infop info_ptr;
 
@@ -272,11 +344,19 @@ Status APNGEncoder::EncodePackedPixelFileToAPNG(
                  PNG_INTERLACE_NONE, PNG_COMPRESSION_TYPE_BASE,
                  PNG_FILTER_TYPE_BASE);
     if (count == 0) {
-      MaybeAddCICP(ppf.color_encoding, png_ptr, info_ptr);
-      if (!ppf.icc.empty()) {
-        png_set_benign_errors(png_ptr, 1);
-        png_set_iCCP(png_ptr, info_ptr, "1", 0, ppf.icc.data(), ppf.icc.size());
+      if (!MaybeAddSRGB(ppf.color_encoding, png_ptr, info_ptr)) {
+        MaybeAddCICP(ppf.color_encoding, png_ptr, info_ptr);
+        if (!ppf.icc.empty()) {
+          png_set_benign_errors(png_ptr, 1);
+          png_set_iCCP(png_ptr, info_ptr, "1", 0, ppf.icc.data(),
+                       ppf.icc.size());
+        }
+        MaybeAddCHRM(ppf.color_encoding, png_ptr, info_ptr);
+        MaybeAddGAMA(ppf.color_encoding, png_ptr, info_ptr);
       }
+      MaybeAddCLLi(ppf.color_encoding, ppf.info.intensity_target, png_ptr,
+                   info_ptr);
+
       std::vector<std::string> textstrings;
       JXL_RETURN_IF_ERROR(BlobsWriterPNG::Encode(ppf.metadata, &textstrings));
       for (size_t kk = 0; kk + 1 < textstrings.size(); kk += 2) {
@@ -360,9 +440,14 @@ Status APNGEncoder::EncodePackedPixelFileToAPNG(
 }
 
 }  // namespace
+#endif
 
 std::unique_ptr<Encoder> GetAPNGEncoder() {
+#if JPEGXL_ENABLE_APNG
   return jxl::make_unique<APNGEncoder>();
+#else
+  return nullptr;
+#endif
 }
 
 }  // namespace extras
